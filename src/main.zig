@@ -1,13 +1,16 @@
+const std = @import("std");
 const c = @cImport({
 	@cInclude("SDL2/SDL.h");
 });
 
-const TILE_SIZE_PIXELS = 32;
-const NUM_COLS = 12;
-const NUM_ROWS = 22;
+const RndGen = std.rand.DefaultPrng;
 
 const WINDOW_WIDTH = 1280;
 const WINDOW_HEIGHT = 720;
+
+const TILE_SIZE_PIXELS = 32;
+const NUM_COLS = 10;
+const NUM_ROWS = 20;
 
 pub fn main() !void {
 	if (c.SDL_Init(c.SDL_INIT_VIDEO) != 0) {
@@ -39,7 +42,10 @@ pub fn main() !void {
 	};
 	defer c.SDL_DestroyRenderer(renderer);
 
-	var rot: usize = 0;
+	var rand = RndGen.init(@intCast(std.time.microTimestamp()));
+
+	var state = CLEARED_GAME_STATE;
+	_ = TrySpawnRandomMino(&state, &rand.random());
 
 	mainloop: while (true) {
 		var event: c.SDL_Event = undefined;
@@ -52,38 +58,30 @@ pub fn main() !void {
 
 		// Update Game State
 
+
 		// Draw Game State
 		{
 			Set_Color(renderer, 0x00000000);
 			_ = c.SDL_RenderClear(renderer);
 
-			var i: c_int = 0;
-			while (i < 3) {
-				const active: MinoInstance = .{
-					.pos = .{ .x = i * 5, .y = 5 },
-					.type = @enumFromInt(i),
-					.rotation = @enumFromInt(rot),
-				};
+			var y: c_int = 0;
+			while (y < state.field.len) {
+				var x: c_int = 0;
+				while (x < state.field[0].len) {
 
-				const mino = Minoes[@intFromEnum(active.type)];
-				for (mino.rotations[@intFromEnum(active.rotation)]) |offset| {
-					Fill_Rect(
-						renderer,
-						(active.pos.x + offset.x) * TILE_SIZE_PIXELS,
-						(active.pos.y + offset.y) * TILE_SIZE_PIXELS,
-						TILE_SIZE_PIXELS,
-						TILE_SIZE_PIXELS,
-						@intFromEnum(mino.color),
-					);
+					var color: u32 = @intFromEnum(Color.DARK_GREY);
+
+					if (state.field[@intCast(y)][@intCast(x)] != -1) {
+						color = @intFromEnum(Color.BLUE);
+					}
+					Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
+					Draw_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+					x += 1;
 				}
-
-				i += 1;
+				y += 1;
 			}
 
 			c.SDL_RenderPresent(renderer);
-
-			rot = (rot + 1) % NUM_ROTATIONS;
-			c.SDL_Delay(500);
 		}
 	}
 }
@@ -97,7 +95,7 @@ fn Make_SDL_Color(rgba: u32) c.SDL_Color {
 	};
 }
 
-inline fn Set_Color(renderer: *c.SDL_Renderer, rgba: u32) void {
+fn Set_Color(renderer: *c.SDL_Renderer, rgba: u32) callconv(.Inline) void {
 	const color = Make_SDL_Color(rgba);
 	_ = c.SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
 }
@@ -125,7 +123,7 @@ const Rotation = enum(u8) {
 };
 const NUM_ROTATIONS = @intFromEnum(Rotation.NUM_ROTATIONS);
 
-const MinoType = enum(u8) {
+const MinoType = enum(i8) {
 	TYPE_I,
 	TYPE_J,
 	TYPE_L,
@@ -144,24 +142,27 @@ const Point = struct {
 
 const MinoDef = struct {
 	type: MinoType,
-	color: MinoColor,
+	color: Color,
 	rotations: [NUM_ROTATIONS][4]Point,
 };
 
-const MinoColor = enum(u32) {
-	COLOR_CYAN = 0x00FFFF00,
-	COLOR_BLUE = 0x0000FF00,
-	COLOR_ORANGE = 0xFF7F0000,
-	COLOR_YELLOW = 0xFFFF0000,
-	COLOR_PURPLE = 0x80008000,
-	COLOR_GREEN = 0x00FF0000,
-	COLOR_RED = 0xFF000000,
+const Color = enum(u32) {
+	CYAN 		= 0x00FFFF00,
+	BLUE 		= 0x0000FF00,
+	ORANGE 		= 0xFF7F0000,
+	YELLOW 		= 0xFFFF0000,
+	PURPLE 		= 0x80008000,
+	GREEN 		= 0x00FF0000,
+	RED 		= 0xFF000000,
+	DARK_GREY	= 0x20202000,
+	LIGHT_GREY 	= 0x40404000,
+	BLACK		= 0x00000000,
 };
 
 const Minoes = [3]MinoDef{
 	.{
 		.type = .TYPE_I,
-		.color = .COLOR_CYAN,
+		.color = .CYAN,
 		.rotations = [NUM_ROTATIONS][4]Point{
 			[_]Point{ .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 }, .{ .x = 3, .y = 1 } },
 			[_]Point{ .{ .x = 2, .y = 0 }, .{ .x = 2, .y = 1 }, .{ .x = 2, .y = 2 }, .{ .x = 2, .y = 3 } },
@@ -171,7 +172,7 @@ const Minoes = [3]MinoDef{
 	},
 	.{
 		.type = .TYPE_J,
-		.color = .COLOR_BLUE,
+		.color = .BLUE,
 		.rotations = [NUM_ROTATIONS][4]Point{
 			[_]Point{ .{ .x = 0, .y = 0 }, .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 } },
 			[_]Point{ .{ .x = 2, .y = 0 }, .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 1, .y = 2 } },
@@ -181,7 +182,7 @@ const Minoes = [3]MinoDef{
 	},
 	.{
 		.type = .TYPE_L,
-		.color = .COLOR_ORANGE,
+		.color = .ORANGE,
 		.rotations = [NUM_ROTATIONS][4]Point{
 			[_]Point{ .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 }, .{ .x = 2, .y = 0 } },
 			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 1, .y = 2 }, .{ .x = 2, .y = 2 } },
@@ -196,3 +197,33 @@ const MinoInstance = struct {
 	type: MinoType,
 	rotation: Rotation,
 };
+
+const GameState = struct {
+	field: [NUM_ROWS][NUM_COLS]i8,
+	active_mino: ?MinoInstance,
+};
+
+const CLEARED_GAME_STATE: GameState = .{
+	.field = [_][NUM_COLS]i8{ [_]i8{ -1 } ** NUM_COLS } ** NUM_ROWS,
+	.active_mino = null,
+};
+
+// Try to spawn a random new Mino at the starting location, which is centered on the top row.
+// The MinoType is random but the rotation is always ROTATION_0.
+fn TrySpawnRandomMino(state: *GameState, rand: *const std.rand.Random) bool {
+	// const type = rand.*.uintLessThan(u8, NUM_MINO_TYPES);
+	const mino_type = rand.*.uintLessThan(u8, 3);
+
+	const active_mino: MinoInstance = .{
+		.pos = .{ .x = @divFloor(NUM_COLS, 2) - 2, .y = 0 },
+		.type =  @enumFromInt(mino_type),
+		.rotation = .ROTATION_0,
+	};
+
+	state.*.active_mino = active_mino;
+	for (Minoes[mino_type].rotations[0]) |offsets| {
+		state.*.field[@intCast(active_mino.pos.y + offsets.y)][@intCast(active_mino.pos.x + offsets.x)] = @intCast(mino_type);
+	}
+
+	return true;
+}
