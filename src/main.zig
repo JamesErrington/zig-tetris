@@ -137,8 +137,9 @@ pub fn main() !void {
 
 						var color: u32 = @intFromEnum(Color.DARK_GREY);
 
-						if (state.field[@intCast(y)][@intCast(x)] != EMPTY_SPACE) {
-							color = @intFromEnum(Color.BLUE);
+						const tile_value = state.field[@intCast(y)][@intCast(x)];
+						if (tile_value != EMPTY_SPACE) {
+							color = mino_color(tile_value);
 						}
 
 						const dx = FIELD_X_OFFSET + x * TILE_SIZE_PIXELS;
@@ -158,7 +159,9 @@ pub fn main() !void {
 
 					const dx = FIELD_X_OFFSET + x * TILE_SIZE_PIXELS;
 					const dy = FIELD_Y_OFFSET + y * TILE_SIZE_PIXELS;
-					Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.BLUE));
+
+					const color = mino_color(@intFromEnum(active_mino.type));
+					Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
 					Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
 				}
 			}
@@ -174,7 +177,9 @@ pub fn main() !void {
 
 					const dx = x_offset + x * TILE_SIZE_PIXELS;
 					const dy = y_offset + y * TILE_SIZE_PIXELS;
-					Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.BLUE));
+
+					const color = mino_color(@intFromEnum(next_mino.type));
+					Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
 					Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
 				}
 
@@ -262,7 +267,11 @@ const Color = enum(u32) {
 	BLACK		= 0x00000000,
 };
 
-const Minoes = [3]MinoDef{
+fn mino_color(mino_type: MinoTypeTag) callconv(.Inline) u32 {
+	return @intFromEnum(Minoes[@intCast(mino_type)].color);
+}
+
+const Minoes = [NUM_MINO_TYPES]MinoDef{
 	.{
 		.type = .TYPE_I,
 		.color = .CYAN,
@@ -291,6 +300,46 @@ const Minoes = [3]MinoDef{
 			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 1, .y = 2 }, .{ .x = 2, .y = 2 } },
 			[_]Point{ .{ .x = 2, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 0, .y = 1 }, .{ .x = 0, .y = 2 } },
 			[_]Point{ .{ .x = 1, .y = 2 }, .{ .x = 1, .y = 1 }, .{ .x = 1, .y = 0 }, .{ .x = 0, .y = 0 } },
+		},
+	},
+	.{
+		.type = .TYPE_O,
+		.color = .YELLOW,
+		.rotations = [NUM_ROTATIONS][4]Point{
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 2, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 } },
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 2, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 } },
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 2, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 } },
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 2, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 } },
+		},
+	},
+	.{
+		.type = .TYPE_S,
+		.color = .GREEN,
+		.rotations = [NUM_ROTATIONS][4]Point{
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 2, .y = 0 }, .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 1 } },
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 }, .{ .x = 2, .y = 2 } },
+			[_]Point{ .{ .x = 0, .y = 2 }, .{ .x = 1, .y = 2 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 } },
+			[_]Point{ .{ .x = 0, .y = 0 }, .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 1, .y = 2 } },
+		},
+	},
+	.{
+		.type = .TYPE_T,
+		.color = .PURPLE,
+		.rotations = [NUM_ROTATIONS][4]Point{
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 } },
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 }, .{ .x = 1, .y = 2 } },
+			[_]Point{ .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 }, .{ .x = 1, .y = 2 } },
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 2 } },
+		},
+	},
+	.{
+		.type = .TYPE_Z,
+		.color = .RED,
+		.rotations = [NUM_ROTATIONS][4]Point{
+			[_]Point{ .{ .x = 0, .y = 0 }, .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 2, .y = 1 } },
+			[_]Point{ .{ .x = 2, .y = 0 }, .{ .x = 2, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 1, .y = 2 } },
+			[_]Point{ .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 1 }, .{ .x = 1, .y = 2 }, .{ .x = 2, .y = 2 } },
+			[_]Point{ .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1 }, .{ .x = 0, .y = 1 }, .{ .x = 0, .y = 2 } },
 		},
 	},
 };
@@ -330,8 +379,7 @@ fn init_game_state(rand: *const std.rand.Random) GameState {
 }
 
 fn random_mino(rand: *const std.rand.Random) MinoInstance {
-	// const type = rand.*.uintLessThan(u8, NUM_MINO_TYPES);
-	const mino_type = rand.*.uintLessThan(u8, 3);
+	const mino_type = rand.*.uintLessThan(u8, NUM_MINO_TYPES);
 
 	return .{
 		.pos = .{ .x = 0, .y = 0 },
