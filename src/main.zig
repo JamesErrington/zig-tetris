@@ -1,9 +1,11 @@
 const std = @import("std");
 const c = @cImport({
 	@cInclude("SDL2/SDL.h");
+	@cInclude("SDL2/SDL_ttf.h");
 });
 
 const assert = std.debug.assert;
+const allocator = std.heap.c_allocator;
 const RndGen = std.rand.DefaultPrng;
 
 const WINDOW_WIDTH = 1280;
@@ -17,6 +19,9 @@ const FIELD_WIDTH_PIXELS = TILE_SIZE_PIXELS * NUM_COLS;
 const FIELD_HEIGHT_PIXELS = TILE_SIZE_PIXELS * NUM_ROWS;
 const FIELD_X_OFFSET = (WINDOW_WIDTH / 2) - (FIELD_WIDTH_PIXELS / 2);
 const FIELD_Y_OFFSET = WINDOW_HEIGHT - FIELD_HEIGHT_PIXELS;
+
+const FONT_NAME = "OpenSans-Regular.ttf";
+const FONT_SIZE = 28;
 
 comptime {
 	assert(FIELD_X_OFFSET > 0 and FIELD_X_OFFSET < WINDOW_WIDTH);
@@ -54,6 +59,18 @@ pub fn main() !void {
 		return error.SDLInitFailed;
 	};
 	defer c.SDL_DestroyRenderer(renderer);
+
+	if (c.TTF_Init() != 0) {
+		c.SDL_Log("Unable to initialize TTF: %s", c.TTF_GetError());
+		return error.SDLInitFailed;
+	}
+	defer c.TTF_Quit();
+
+	const font = c.TTF_OpenFont(FONT_NAME, FONT_SIZE) orelse {
+		c.SDL_Log("Unable to open font '%s': %s", FONT_NAME, c.TTF_GetError());
+		return error.SDLInitFailed;
+	};
+	defer c.TTF_CloseFont(font);
 
 	var rand = RndGen.init(@intCast(std.time.microTimestamp()));
 
@@ -185,6 +202,14 @@ pub fn main() !void {
 
 			}
 
+			{ // Text
+				const score_string = try std.fmt.allocPrintZ(allocator, "Lines Cleared: {}", .{state.lines_cleared});
+				defer allocator.free(score_string);
+
+				const c_string: [*c]const u8 = @ptrCast(score_string);
+				try Draw_Text(renderer, FIELD_X_OFFSET + FIELD_WIDTH_PIXELS + 50, 50, c_string, font, @intFromEnum(Color.WHITE));
+			}
+
 			c.SDL_RenderPresent(renderer);
 		}
 	}
@@ -207,15 +232,34 @@ fn Set_Color(renderer: *c.SDL_Renderer, rgba: u32) callconv(.Inline) void {
 fn Draw_Rect(renderer: *c.SDL_Renderer, x: c_int, y: c_int, w: c_int, h: c_int, rgba: u32) void {
 	Set_Color(renderer, rgba);
 
-	const rect: c.SDL_Rect = .{ .x = x, .y = y, .w = w, .h = h};
-	_ = c.SDL_RenderDrawRect(renderer, &rect);
+	const dest: c.SDL_Rect = .{ .x = x, .y = y, .w = w, .h = h};
+	_ = c.SDL_RenderDrawRect(renderer, &dest);
 }
 
 fn Fill_Rect(renderer: *c.SDL_Renderer, x: c_int, y: c_int, w: c_int, h: c_int, rgba: u32) void {
 	Set_Color(renderer, rgba);
 
-	const rect: c.SDL_Rect = .{ .x = x, .y = y, .w = w, .h = h};
-	_ = c.SDL_RenderFillRect(renderer, &rect);
+	const dest: c.SDL_Rect = .{ .x = x, .y = y, .w = w, .h = h};
+	_ = c.SDL_RenderFillRect(renderer, &dest);
+}
+
+fn Draw_Text(renderer: *c.SDL_Renderer, x: c_int, y: c_int, text: [*c]const u8, font: *c.TTF_Font, rgba: u32) !void {
+	const color = Make_SDL_Color(rgba);
+
+	const surface = c.TTF_RenderText_Blended(font, text, color) orelse {
+		c.SDL_Log("Unable to render text to surface: %s", c.TTF_GetError());
+		return error.SDLRenderFailed;
+	};
+	defer c.SDL_FreeSurface(surface);
+
+	const texture = c.SDL_CreateTextureFromSurface(renderer, surface) orelse {
+		c.SDL_Log("Unable to create texture from surface: %s", c.SDL_GetError());
+		return error.SDLRenderFailed;
+	};
+	defer c.SDL_DestroyTexture(texture);
+
+	const dest: c.SDL_Rect = .{ .x = x, .y = y, .w = surface.*.w, .h = surface.*.h };
+	_ = c.SDL_RenderCopy(renderer, texture, null, &dest);
 }
 
 const Rotation = enum(u8) {
@@ -265,6 +309,7 @@ const Color = enum(u32) {
 	DARK_GREY	= 0x20202000,
 	LIGHT_GREY 	= 0x40404000,
 	BLACK		= 0x00000000,
+	WHITE		= 0xFFFFFF00,
 };
 
 fn mino_color(mino_type: MinoTypeTag) callconv(.Inline) u32 {

@@ -11,7 +11,8 @@ pub fn build(b: *std.Build) void {
 		.optimize = optimize,
 	});
 
-	exe.linkSystemLibrary("sdl2");
+	exe.linkSystemLibrary("SDL2");
+	exe.linkSystemLibrary("SDL2_ttf");
     exe.linkLibC();
 
 	b.installArtifact(exe);
