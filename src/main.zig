@@ -44,7 +44,7 @@ pub fn main() !void {
 
 	var rand = RndGen.init(@intCast(std.time.microTimestamp()));
 
-	var state = CLEARED_GAME_STATE;
+	var state = InitGameState();
 	_ = TrySpawnRandomMino(&state, &rand.random());
 
 	mainloop: while (true) {
@@ -57,6 +57,19 @@ pub fn main() !void {
 		}
 
 		// Update Game State
+		{
+			state.frames_until_fall -= 1;
+			if (state.frames_until_fall <= 0) {
+				state.frames_until_fall = 48;
+
+				if (state.active_mino) |active_mino| {
+					state.active_mino.?.pos.y += 1;
+					if (active_mino.pos.y >= NUM_ROWS) {
+						state.active_mino.?.pos.y = 0;
+					}
+				}
+			}
+		}
 
 
 		// Draw Game State
@@ -64,22 +77,35 @@ pub fn main() !void {
 			Set_Color(renderer, 0x00000000);
 			_ = c.SDL_RenderClear(renderer);
 
-			var y: c_int = 0;
-			while (y < state.field.len) {
-				var x: c_int = 0;
-				while (x < state.field[0].len) {
+			{
+				var y: c_int = 0;
+				while (y < state.field.len) {
+					var x: c_int = 0;
+					while (x < state.field[0].len) {
 
-					var color: u32 = @intFromEnum(Color.DARK_GREY);
+						var color: u32 = @intFromEnum(Color.DARK_GREY);
 
-					if (state.field[@intCast(y)][@intCast(x)] != -1) {
-						color = @intFromEnum(Color.BLUE);
+						if (state.field[@intCast(y)][@intCast(x)] != -1) {
+							color = @intFromEnum(Color.BLUE);
+						}
+						Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
+						Draw_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+						x += 1;
 					}
-					Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
-					Draw_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
-					x += 1;
+					y += 1;
 				}
-				y += 1;
 			}
+
+			{
+				if (state.active_mino) |active_mino| {
+					for (Minoes[@intCast(@intFromEnum(active_mino.type))].rotations[0]) |offsets| {
+						const x = active_mino.pos.x + offsets.x;
+						const y = active_mino.pos.y + offsets.y;
+						Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.BLUE));
+					}
+				}
+			}
+
 
 			c.SDL_RenderPresent(renderer);
 		}
@@ -201,12 +227,16 @@ const MinoInstance = struct {
 const GameState = struct {
 	field: [NUM_ROWS][NUM_COLS]i8,
 	active_mino: ?MinoInstance,
+	frames_until_fall: isize,
 };
 
-const CLEARED_GAME_STATE: GameState = .{
-	.field = [_][NUM_COLS]i8{ [_]i8{ -1 } ** NUM_COLS } ** NUM_ROWS,
-	.active_mino = null,
-};
+fn InitGameState() GameState {
+	return .{
+		.field = [_][NUM_COLS]i8{ [_]i8{ -1 } ** NUM_COLS } ** NUM_ROWS,
+		.active_mino = null,
+		.frames_until_fall = 48,
+	};
+}
 
 // Try to spawn a random new Mino at the starting location, which is centered on the top row.
 // The MinoType is random but the rotation is always ROTATION_0.
@@ -221,9 +251,7 @@ fn TrySpawnRandomMino(state: *GameState, rand: *const std.rand.Random) bool {
 	};
 
 	state.*.active_mino = active_mino;
-	for (Minoes[mino_type].rotations[0]) |offsets| {
-		state.*.field[@intCast(active_mino.pos.y + offsets.y)][@intCast(active_mino.pos.x + offsets.x)] = @intCast(mino_type);
-	}
+	state.*.frames_until_fall = 48;
 
 	return true;
 }
