@@ -3,6 +3,7 @@ const c = @cImport({
 	@cInclude("SDL2/SDL.h");
 });
 
+const assert = std.debug.assert;
 const RndGen = std.rand.DefaultPrng;
 
 const WINDOW_WIDTH = 1280;
@@ -11,6 +12,16 @@ const WINDOW_HEIGHT = 720;
 const TILE_SIZE_PIXELS = 32;
 const NUM_COLS = 10;
 const NUM_ROWS = 20;
+
+const FIELD_WIDTH_PIXELS = TILE_SIZE_PIXELS * NUM_COLS;
+const FIELD_HEIGHT_PIXELS = TILE_SIZE_PIXELS * NUM_ROWS;
+const FIELD_X_OFFSET = (WINDOW_WIDTH / 2) - (FIELD_WIDTH_PIXELS / 2);
+const FIELD_Y_OFFSET = WINDOW_HEIGHT - FIELD_HEIGHT_PIXELS;
+
+comptime {
+	assert(FIELD_X_OFFSET > 0 and FIELD_X_OFFSET < WINDOW_WIDTH);
+	assert(FIELD_Y_OFFSET > 0 and FIELD_Y_OFFSET < WINDOW_HEIGHT);
+}
 
 const FRAMES_PER_DROP = 30;
 
@@ -46,8 +57,8 @@ pub fn main() !void {
 
 	var rand = RndGen.init(@intCast(std.time.microTimestamp()));
 
-	var state = init_game_state();
-	_ = try_spawn_random_mino(&state, &rand.random());
+	var state = init_game_state(&rand.random());
+	_ = try_spawn_next_mino(&state, &rand.random());
 
 	mainloop: while (true) {
 		var event: c.SDL_Event = undefined;
@@ -102,9 +113,9 @@ pub fn main() !void {
 				if (check_collision(&state, &future_mino)) {
 					add_active_mino_to_field(&state);
 
-					const valid_spawn = try_spawn_random_mino(&state, &rand.random());
+					const valid_spawn = try_spawn_next_mino(&state, &rand.random());
 					if (!valid_spawn) {
-						std.debug.print("FINISHED!", .{});
+						std.debug.print("FINISHED! You scored {}\n", .{state.lines_cleared});
 					}
 				} else {
 					state.active_mino.pos.y = future_mino.pos.y;
@@ -118,7 +129,7 @@ pub fn main() !void {
 			Set_Color(renderer, 0x00000000);
 			_ = c.SDL_RenderClear(renderer);
 
-			{
+			{ // Static field
 				var y: c_int = 0;
 				while (y < state.field.len) : (y += 1) {
 					var x: c_int = 0;
@@ -129,20 +140,44 @@ pub fn main() !void {
 						if (state.field[@intCast(y)][@intCast(x)] != EMPTY_SPACE) {
 							color = @intFromEnum(Color.BLUE);
 						}
-						Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
-						Draw_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+
+						const dx = FIELD_X_OFFSET + x * TILE_SIZE_PIXELS;
+						const dy = FIELD_Y_OFFSET + y * TILE_SIZE_PIXELS;
+
+						Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
+						Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
 					}
 				}
 			}
 
-			{
+			{ // Active mino
 				const active_mino = state.active_mino;
 				for (Minoes[@intCast(@intFromEnum(active_mino.type))].rotations[@intFromEnum(active_mino.rotation)]) |offsets| {
 					const x = active_mino.pos.x + offsets.x;
 					const y = active_mino.pos.y + offsets.y;
-					Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.BLUE));
-					Draw_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+
+					const dx = FIELD_X_OFFSET + x * TILE_SIZE_PIXELS;
+					const dy = FIELD_Y_OFFSET + y * TILE_SIZE_PIXELS;
+					Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.BLUE));
+					Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
 				}
+			}
+
+			{ // Next mino
+				const next_mino = state.next_mino;
+				const x_offset = (WINDOW_WIDTH / 2) + FIELD_WIDTH_PIXELS;
+				const y_offset = (WINDOW_HEIGHT / 2);
+
+				for (Minoes[@intCast(@intFromEnum(next_mino.type))].rotations[@intFromEnum(next_mino.rotation)]) |offsets| {
+					const x = next_mino.pos.x + offsets.x;
+					const y = next_mino.pos.y + offsets.y;
+
+					const dx = x_offset + x * TILE_SIZE_PIXELS;
+					const dy = y_offset + y * TILE_SIZE_PIXELS;
+					Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.BLUE));
+					Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+				}
+
 			}
 
 			c.SDL_RenderPresent(renderer);
@@ -190,7 +225,8 @@ fn next_rotation(rot: Rotation) callconv(.Inline) Rotation {
 	return @enumFromInt((@intFromEnum(rot) + 1) % NUM_ROTATIONS);
 }
 
-const MinoType = enum(i8) {
+const MinoTypeTag = i8;
+const MinoType = enum(MinoTypeTag) {
 	TYPE_I,
 	TYPE_J,
 	TYPE_L,
@@ -200,7 +236,7 @@ const MinoType = enum(i8) {
 	TYPE_Z,
 };
 const NUM_MINO_TYPES = @typeInfo(MinoType).Enum.fields.len;
-const EMPTY_SPACE: @typeInfo(MinoType).Enum.tag_type = -1;
+const EMPTY_SPACE: MinoTypeTag = -1;
 
 const Point = struct {
 	x: c_int,
@@ -272,36 +308,41 @@ const MinoInstance = struct {
 };
 
 const GameState = struct {
-	field: [NUM_ROWS][NUM_COLS]i8,
+	field: [NUM_ROWS][NUM_COLS]MinoTypeTag,
 	active_mino: MinoInstance,
+	next_mino: MinoInstance,
 	frames_until_drop: isize,
 	lines_cleared: usize,
 };
 
-fn init_game_state() GameState {
+fn init_game_state(rand: *const std.rand.Random) GameState {
 	return .{
-		.field = [_][NUM_COLS]i8{ [_]i8{ EMPTY_SPACE } ** NUM_COLS } ** NUM_ROWS,
+		.field = [_][NUM_COLS]MinoTypeTag{ [_]MinoTypeTag{ EMPTY_SPACE } ** NUM_COLS } ** NUM_ROWS,
 		.active_mino = .{
 			.pos = .{ .x = 0, .y = 0 },
 			.type = .TYPE_I,
 			.rotation = .ROTATION_0,
 		},
+		.next_mino = random_mino(rand),
 		.frames_until_drop = FRAMES_PER_DROP,
 		.lines_cleared = 0,
 	};
 }
 
-// Try to spawn a random new Mino at the starting location, which is centered on the top row.
-// The MinoType is random but the rotation is always ROTATION_0.
-fn try_spawn_random_mino(state: *GameState, rand: *const std.rand.Random) bool {
+fn random_mino(rand: *const std.rand.Random) MinoInstance {
 	// const type = rand.*.uintLessThan(u8, NUM_MINO_TYPES);
 	const mino_type = rand.*.uintLessThan(u8, 3);
 
-	const active_mino: MinoInstance = .{
-		.pos = .{ .x = @divFloor(NUM_COLS, 2) - 2, .y = 0 },
+	return .{
+		.pos = .{ .x = 0, .y = 0 },
 		.type =  @enumFromInt(mino_type),
 		.rotation = .ROTATION_0,
 	};
+}
+
+fn try_spawn_next_mino(state: *GameState, rand: *const std.rand.Random) bool {
+	var active_mino: MinoInstance = state.*.next_mino;
+	active_mino.pos = .{ .x = @divFloor(NUM_COLS, 2) - 2, .y = 0 };
 
 	if (check_collision(state, &active_mino)) {
 		return false;
@@ -309,6 +350,8 @@ fn try_spawn_random_mino(state: *GameState, rand: *const std.rand.Random) bool {
 
 	state.*.active_mino = active_mino;
 	state.*.frames_until_drop = FRAMES_PER_DROP;
+
+	state.*.next_mino = random_mino(rand);
 
 	return true;
 }
