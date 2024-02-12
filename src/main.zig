@@ -44,15 +44,23 @@ pub fn main() !void {
 
 	var rand = RndGen.init(@intCast(std.time.microTimestamp()));
 
-	var state = InitGameState();
-	_ = TrySpawnRandomMino(&state, &rand.random());
+	var state = Init_Game_State();
+	_ = Try_Spawn_Random_Mino(&state, &rand.random());
 
 	mainloop: while (true) {
 		var event: c.SDL_Event = undefined;
 		while (c.SDL_PollEvent(&event) != 0) {
-			switch (event.type) {
-				c.SDL_QUIT => break :mainloop,
-				else => {},
+			if (event.type == c.SDL_QUIT) {
+				break :mainloop;
+			}
+
+			if (event.type == c.SDL_KEYDOWN) {
+				switch (event.key.keysym.sym) {
+					c.SDLK_UP => {
+						state.active_mino.?.rotation = Next_Rotation(state.active_mino.?.rotation);
+					},
+					else => {},
+				}
 			}
 		}
 
@@ -62,10 +70,12 @@ pub fn main() !void {
 			if (state.frames_until_fall <= 0) {
 				state.frames_until_fall = 48;
 
-				if (state.active_mino) |active_mino| {
+				if (state.active_mino) |_| {
 					state.active_mino.?.pos.y += 1;
-					if (active_mino.pos.y >= NUM_ROWS) {
-						state.active_mino.?.pos.y = 0;
+
+					if (Is_Collision(&state)) {
+						Add_Mino_To_Field(&state);
+						_ = Try_Spawn_Random_Mino(&state, &rand.random());
 					}
 				}
 			}
@@ -98,7 +108,7 @@ pub fn main() !void {
 
 			{
 				if (state.active_mino) |active_mino| {
-					for (Minoes[@intCast(@intFromEnum(active_mino.type))].rotations[0]) |offsets| {
+					for (Minoes[@intCast(@intFromEnum(active_mino.type))].rotations[@intFromEnum(active_mino.rotation)]) |offsets| {
 						const x = active_mino.pos.x + offsets.x;
 						const y = active_mino.pos.y + offsets.y;
 						Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.BLUE));
@@ -148,6 +158,10 @@ const Rotation = enum(u8) {
 	NUM_ROTATIONS,
 };
 const NUM_ROTATIONS = @intFromEnum(Rotation.NUM_ROTATIONS);
+
+fn Next_Rotation(rot: Rotation) Rotation {
+	return @enumFromInt((@intFromEnum(rot) + 1) % NUM_ROTATIONS);
+}
 
 const MinoType = enum(i8) {
 	TYPE_I,
@@ -230,7 +244,7 @@ const GameState = struct {
 	frames_until_fall: isize,
 };
 
-fn InitGameState() GameState {
+fn Init_Game_State() GameState {
 	return .{
 		.field = [_][NUM_COLS]i8{ [_]i8{ -1 } ** NUM_COLS } ** NUM_ROWS,
 		.active_mino = null,
@@ -240,7 +254,7 @@ fn InitGameState() GameState {
 
 // Try to spawn a random new Mino at the starting location, which is centered on the top row.
 // The MinoType is random but the rotation is always ROTATION_0.
-fn TrySpawnRandomMino(state: *GameState, rand: *const std.rand.Random) bool {
+fn Try_Spawn_Random_Mino(state: *GameState, rand: *const std.rand.Random) bool {
 	// const type = rand.*.uintLessThan(u8, NUM_MINO_TYPES);
 	const mino_type = rand.*.uintLessThan(u8, 3);
 
@@ -254,4 +268,34 @@ fn TrySpawnRandomMino(state: *GameState, rand: *const std.rand.Random) bool {
 	state.*.frames_until_fall = 48;
 
 	return true;
+}
+
+fn Is_Collision(state: *const GameState) bool {
+	if (state.*.active_mino) |active_mino| {
+		const mino_def = Minoes[@intCast(@intFromEnum(active_mino.type))];
+
+		for (mino_def.rotations[@intFromEnum(active_mino.rotation)]) |offsets| {
+			const x = active_mino.pos.x + offsets.x;
+			const y = active_mino.pos.y + offsets.y;
+
+			if ((x < 0) or (x >= NUM_COLS) or (y < 0) or (y >= NUM_ROWS) or (state.*.field[@intCast(y)][@intCast(x)] != -1)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+fn Add_Mino_To_Field(state: *GameState) void {
+	if (state.*.active_mino) |active_mino| {
+		const mino_def = Minoes[@intCast(@intFromEnum(active_mino.type))];
+
+		for (mino_def.rotations[@intFromEnum(active_mino.rotation)]) |offsets| {
+			const x = active_mino.pos.x + offsets.x;
+			const y = active_mino.pos.y + offsets.y;
+
+			state.*.field[@intCast(y)][@intCast(x)] = @intFromEnum(active_mino.type);
+		}
+	}
 }
