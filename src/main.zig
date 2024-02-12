@@ -12,6 +12,8 @@ const TILE_SIZE_PIXELS = 32;
 const NUM_COLS = 10;
 const NUM_ROWS = 20;
 
+const FRAMES_PER_DROP = 30;
+
 pub fn main() !void {
 	if (c.SDL_Init(c.SDL_INIT_VIDEO) != 0) {
 		c.SDL_Log("Unable to initialize SDL: %s", c.SDL_GetError());
@@ -59,6 +61,30 @@ pub fn main() !void {
 					c.SDLK_UP => {
 						state.active_mino.rotation = next_rotation(state.active_mino.rotation);
 					},
+					c.SDLK_DOWN => {
+						var future_mino = state.active_mino;
+						future_mino.pos.y += 1;
+
+						if (!check_collision(&state, &future_mino)) {
+							state.active_mino.pos = future_mino.pos;
+						}
+					},
+					c.SDLK_LEFT => {
+						var future_mino = state.active_mino;
+						future_mino.pos.x -= 1;
+
+						if (!check_collision(&state, &future_mino)) {
+							state.active_mino.pos = future_mino.pos;
+						}
+					},
+					c.SDLK_RIGHT => {
+						var future_mino = state.active_mino;
+						future_mino.pos.x += 1;
+
+						if (!check_collision(&state, &future_mino)) {
+							state.active_mino.pos = future_mino.pos;
+						}
+					},
 					else => {},
 				}
 			}
@@ -66,16 +92,20 @@ pub fn main() !void {
 
 		// Update Game State
 		{
-			state.frames_until_fall -= 1;
-			if (state.frames_until_fall <= 0) {
-				state.frames_until_fall = 48;
+			state.frames_until_drop -= 1;
+			if (state.frames_until_drop <= 0) {
+			state.frames_until_drop = FRAMES_PER_DROP;
 
 				var future_mino = state.active_mino;
 				future_mino.pos.y += 1;
 
 				if (check_collision(&state, &future_mino)) {
 					add_active_mino_to_field(&state);
-					_ = try_spawn_random_mino(&state, &rand.random());
+
+					const valid_spawn = try_spawn_random_mino(&state, &rand.random());
+					if (!valid_spawn) {
+						std.debug.print("FINISHED!", .{});
+					}
 				} else {
 					state.active_mino.pos.y = future_mino.pos.y;
 				}
@@ -90,20 +120,18 @@ pub fn main() !void {
 
 			{
 				var y: c_int = 0;
-				while (y < state.field.len) {
+				while (y < state.field.len) : (y += 1) {
 					var x: c_int = 0;
-					while (x < state.field[0].len) {
+					while (x < state.field[0].len) : (x += 1) {
 
 						var color: u32 = @intFromEnum(Color.DARK_GREY);
 
-						if (state.field[@intCast(y)][@intCast(x)] != -1) {
+						if (state.field[@intCast(y)][@intCast(x)] != EMPTY_SPACE) {
 							color = @intFromEnum(Color.BLUE);
 						}
 						Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
 						Draw_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
-						x += 1;
 					}
-					y += 1;
 				}
 			}
 
@@ -113,6 +141,7 @@ pub fn main() !void {
 					const x = active_mino.pos.x + offsets.x;
 					const y = active_mino.pos.y + offsets.y;
 					Fill_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.BLUE));
+					Draw_Rect(renderer, x * TILE_SIZE_PIXELS, y * TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
 				}
 			}
 
@@ -154,9 +183,8 @@ const Rotation = enum(u8) {
 	ROTATION_90,
 	ROTATION_180,
 	ROTATION_270,
-	NUM_ROTATIONS,
 };
-const NUM_ROTATIONS = @intFromEnum(Rotation.NUM_ROTATIONS);
+const NUM_ROTATIONS = @typeInfo(Rotation).Enum.fields.len;
 
 fn next_rotation(rot: Rotation) callconv(.Inline) Rotation {
 	return @enumFromInt((@intFromEnum(rot) + 1) % NUM_ROTATIONS);
@@ -170,9 +198,9 @@ const MinoType = enum(i8) {
 	TYPE_S,
 	TYPE_T,
 	TYPE_Z,
-	NUM_MINO_TYPES,
 };
-const NUM_MINO_TYPES = @intFromEnum(MinoType.NUM_MINO_TYPES);
+const NUM_MINO_TYPES = @typeInfo(MinoType).Enum.fields.len;
+const EMPTY_SPACE: @typeInfo(MinoType).Enum.tag_type = -1;
 
 const Point = struct {
 	x: c_int,
@@ -231,6 +259,12 @@ const Minoes = [3]MinoDef{
 	},
 };
 
+const GameInput = enum {
+	ROTATE,
+	MOVE_LEFT,
+	MOVE_RIGHT,
+};
+
 const MinoInstance = struct {
 	pos: Point,
 	type: MinoType,
@@ -240,18 +274,20 @@ const MinoInstance = struct {
 const GameState = struct {
 	field: [NUM_ROWS][NUM_COLS]i8,
 	active_mino: MinoInstance,
-	frames_until_fall: isize,
+	frames_until_drop: isize,
+	lines_cleared: usize,
 };
 
 fn init_game_state() GameState {
 	return .{
-		.field = [_][NUM_COLS]i8{ [_]i8{ -1 } ** NUM_COLS } ** NUM_ROWS,
+		.field = [_][NUM_COLS]i8{ [_]i8{ EMPTY_SPACE } ** NUM_COLS } ** NUM_ROWS,
 		.active_mino = .{
 			.pos = .{ .x = 0, .y = 0 },
 			.type = .TYPE_I,
 			.rotation = .ROTATION_0,
 		},
-		.frames_until_fall = 48,
+		.frames_until_drop = FRAMES_PER_DROP,
+		.lines_cleared = 0,
 	};
 }
 
@@ -267,8 +303,12 @@ fn try_spawn_random_mino(state: *GameState, rand: *const std.rand.Random) bool {
 		.rotation = .ROTATION_0,
 	};
 
+	if (check_collision(state, &active_mino)) {
+		return false;
+	}
+
 	state.*.active_mino = active_mino;
-	state.*.frames_until_fall = 48;
+	state.*.frames_until_drop = FRAMES_PER_DROP;
 
 	return true;
 }
@@ -278,7 +318,7 @@ fn check_collision(state: *const GameState, mino: *const MinoInstance) bool {
 		const x = mino.pos.x + offsets.x;
 		const y = mino.pos.y + offsets.y;
 
-		if ((x < 0) or (x >= NUM_COLS) or (y < 0) or (y >= NUM_ROWS) or (state.*.field[@intCast(y)][@intCast(x)] != -1)) {
+		if ((x < 0) or (x >= NUM_COLS) or (y < 0) or (y >= NUM_ROWS) or (state.*.field[@intCast(y)][@intCast(x)] != EMPTY_SPACE)) {
 			return true;
 		}
 	}
@@ -294,4 +334,33 @@ fn add_active_mino_to_field(state: *GameState) void {
 
 		state.*.field[@intCast(y)][@intCast(x)] = @intFromEnum(active_mino.type);
 	}
+
+	// Clear the full rows
+	var n_cleared: usize = 0;
+	var y: usize = 0;
+	while (y < state.field.len) : (y += 1) {
+		var is_full = true;
+
+		var x: usize = 0;
+		while (x < state.field[0].len) : (x += 1) {
+			if (state.field[y][x] == EMPTY_SPACE) {
+				is_full = false;
+				break;
+			}
+		}
+
+		// We need to drop the blocks above down
+		if (is_full) {
+			n_cleared += 1;
+			var yy: usize = y;
+			while (yy > 0) : (yy -= 1) {
+				var xx: usize = 0;
+				while (xx < state.field[0].len) : (xx += 1) {
+					state.field[yy][xx] = state.field[yy - 1][xx];
+				}
+			}
+		}
+	}
+
+	state.lines_cleared += n_cleared;
 }
