@@ -8,31 +8,35 @@ const assert = std.debug.assert;
 const allocator = std.heap.c_allocator;
 const RndGen = std.rand.DefaultPrng;
 
-const WINDOW_WIDTH = 1280;
-const WINDOW_HEIGHT = 720;
-
 const TILE_SIZE_PIXELS = 32;
 const NUM_COLS = 10;
 const NUM_ROWS = 20;
 
+const WINDOW_X_PADDING = 20;
+const WINDOW_Y_PADDING = 20;
 const FIELD_WIDTH_PIXELS = TILE_SIZE_PIXELS * NUM_COLS;
 const FIELD_HEIGHT_PIXELS = TILE_SIZE_PIXELS * NUM_ROWS;
-const FIELD_X_OFFSET = (WINDOW_WIDTH / 2) - (FIELD_WIDTH_PIXELS / 2);
-const FIELD_Y_OFFSET = WINDOW_HEIGHT - FIELD_HEIGHT_PIXELS;
+
+const WINDOW_WIDTH = 2 * (FIELD_WIDTH_PIXELS + WINDOW_X_PADDING);
+const WINDOW_HEIGHT = FIELD_HEIGHT_PIXELS + (2 * WINDOW_Y_PADDING);
+
+const FIELD_X_OFFSET = WINDOW_X_PADDING;
+const FIELD_Y_OFFSET = WINDOW_Y_PADDING;
+
+const NEXT_MINO_X_OFFSET = (3 * WINDOW_WIDTH / 4) - (2 * TILE_SIZE_PIXELS);
+const NEXT_MINO_Y_OFFSET = (WINDOW_HEIGHT / 2) - TILE_SIZE_PIXELS;
+
+const GAME_START_TEXT_X_OFFSET = (3 * WINDOW_WIDTH / 4) - 130;
+const GAME_START_TEXT_Y_OFFSET = 50;
 
 const FONT_NAME = "OpenSans-Regular.ttf";
 const FONT_SIZE = 28;
-
-comptime {
-	assert(FIELD_X_OFFSET > 0 and FIELD_X_OFFSET < WINDOW_WIDTH);
-	assert(FIELD_Y_OFFSET > 0 and FIELD_Y_OFFSET < WINDOW_HEIGHT);
-}
 
 const FRAMES_PER_DROP = 30;
 
 pub fn main() !void {
 	if (c.SDL_Init(c.SDL_INIT_VIDEO) != 0) {
-		c.SDL_Log("Unable to initialize SDL: %s", c.SDL_GetError());
+		c.SDL_LogError(c.SDL_LOG_CATEGORY_ERROR, "Unable to initialize SDL: %s", c.SDL_GetError());
 		return error.SDLInitFailed;
 	}
 	defer c.SDL_Quit();
@@ -45,7 +49,7 @@ pub fn main() !void {
 		WINDOW_HEIGHT,
 		c.SDL_WINDOW_SHOWN
 	) orelse {
-		c.SDL_Log("Unable to create window: %s", c.SDL_GetError());
+		c.SDL_LogError(c.SDL_LOG_CATEGORY_ERROR, "Unable to create window: %s", c.SDL_GetError());
 		return error.SDLInitFailed;
 	};
 	defer c.SDL_DestroyWindow(window);
@@ -55,24 +59,26 @@ pub fn main() !void {
 		-1,
 		c.SDL_RENDERER_ACCELERATED | c.SDL_RENDERER_PRESENTVSYNC
 	) orelse {
-		c.SDL_Log("Unable to create renderer: %s", c.SDL_GetError());
+		c.SDL_LogError(c.SDL_LOG_CATEGORY_ERROR, "Unable to create renderer: %s", c.SDL_GetError());
 		return error.SDLInitFailed;
 	};
 	defer c.SDL_DestroyRenderer(renderer);
 
 	if (c.TTF_Init() != 0) {
-		c.SDL_Log("Unable to initialize TTF: %s", c.TTF_GetError());
+		c.SDL_LogError(c.SDL_LOG_CATEGORY_ERROR, "Unable to initialize TTF: %s", c.TTF_GetError());
 		return error.SDLInitFailed;
 	}
 	defer c.TTF_Quit();
 
 	const font = c.TTF_OpenFont(FONT_NAME, FONT_SIZE) orelse {
-		c.SDL_Log("Unable to open font '%s': %s", FONT_NAME, c.TTF_GetError());
+		c.SDL_LogError(c.SDL_LOG_CATEGORY_ERROR, "Unable to open font: %s", c.TTF_GetError());
 		return error.SDLInitFailed;
 	};
 	defer c.TTF_CloseFont(font);
 
 	var rand = RndGen.init(@intCast(std.time.microTimestamp()));
+
+	var app_state: AppState = .GAME_NOT_STARTED;
 
 	var state = init_game_state(&rand.random());
 	_ = try_spawn_next_mino(&state, &rand.random());
@@ -84,58 +90,76 @@ pub fn main() !void {
 				break :mainloop;
 			}
 
-			if (event.type == c.SDL_KEYDOWN) {
-				switch (event.key.keysym.sym) {
-					c.SDLK_UP => {
-						state.active_mino.rotation = next_rotation(state.active_mino.rotation);
-					},
-					c.SDLK_DOWN => {
-						var future_mino = state.active_mino;
-						future_mino.pos.y += 1;
+			if (app_state == .GAME_NOT_STARTED or app_state == .GAME_OVER) {
+				if (event.type == c.SDL_KEYDOWN) {
+					switch (event.key.keysym.sym) {
+						c.SDLK_SPACE => {
+							state = init_game_state(&rand.random());
+							_ = try_spawn_next_mino(&state, &rand.random());
+							app_state = .GAME_PLAYING;
+						},
+						else => {},
+					}
+				}
+			}
 
-						if (!check_collision(&state, &future_mino)) {
-							state.active_mino.pos = future_mino.pos;
-						}
-					},
-					c.SDLK_LEFT => {
-						var future_mino = state.active_mino;
-						future_mino.pos.x -= 1;
+			if (app_state == .GAME_PLAYING) {
+				if (event.type == c.SDL_KEYDOWN) {
+					switch (event.key.keysym.sym) {
+						c.SDLK_UP => {
+							state.active_mino.rotation = next_rotation(state.active_mino.rotation);
+						},
+						c.SDLK_DOWN => {
+							var future_mino = state.active_mino;
+							future_mino.pos.y += 1;
 
-						if (!check_collision(&state, &future_mino)) {
-							state.active_mino.pos = future_mino.pos;
-						}
-					},
-					c.SDLK_RIGHT => {
-						var future_mino = state.active_mino;
-						future_mino.pos.x += 1;
+							if (!check_collision(&state, &future_mino)) {
+								state.active_mino.pos = future_mino.pos;
+							}
+						},
+						c.SDLK_LEFT => {
+							var future_mino = state.active_mino;
+							future_mino.pos.x -= 1;
 
-						if (!check_collision(&state, &future_mino)) {
-							state.active_mino.pos = future_mino.pos;
-						}
-					},
-					else => {},
+							if (!check_collision(&state, &future_mino)) {
+								state.active_mino.pos = future_mino.pos;
+							}
+						},
+						c.SDLK_RIGHT => {
+							var future_mino = state.active_mino;
+							future_mino.pos.x += 1;
+
+							if (!check_collision(&state, &future_mino)) {
+								state.active_mino.pos = future_mino.pos;
+							}
+						},
+						else => {},
+					}
 				}
 			}
 		}
 
 		// Update Game State
 		{
-			state.frames_until_drop -= 1;
-			if (state.frames_until_drop <= 0) {
-			state.frames_until_drop = FRAMES_PER_DROP;
+			if (app_state == .GAME_PLAYING) {
+				state.frames_until_drop -= 1;
+				if (state.frames_until_drop <= 0) {
+				state.frames_until_drop = FRAMES_PER_DROP;
 
-				var future_mino = state.active_mino;
-				future_mino.pos.y += 1;
+					var future_mino = state.active_mino;
+					future_mino.pos.y += 1;
 
-				if (check_collision(&state, &future_mino)) {
-					add_active_mino_to_field(&state);
+					if (check_collision(&state, &future_mino)) {
+						add_active_mino_to_field(&state);
 
-					const valid_spawn = try_spawn_next_mino(&state, &rand.random());
-					if (!valid_spawn) {
-						std.debug.print("FINISHED! You scored {}\n", .{state.lines_cleared});
+						const valid_spawn = try_spawn_next_mino(&state, &rand.random());
+						if (!valid_spawn) {
+							app_state = .GAME_OVER;
+							std.debug.print("FINISHED! You scored {}\n", .{state.lines_cleared});
+						}
+					} else {
+						state.active_mino.pos.y = future_mino.pos.y;
 					}
-				} else {
-					state.active_mino.pos.y = future_mino.pos.y;
 				}
 			}
 		}
@@ -168,46 +192,61 @@ pub fn main() !void {
 				}
 			}
 
-			{ // Active mino
-				const active_mino = state.active_mino;
-				for (Minoes[@intCast(@intFromEnum(active_mino.type))].rotations[@intFromEnum(active_mino.rotation)]) |offsets| {
-					const x = active_mino.pos.x + offsets.x;
-					const y = active_mino.pos.y + offsets.y;
-
-					const dx = FIELD_X_OFFSET + x * TILE_SIZE_PIXELS;
-					const dy = FIELD_Y_OFFSET + y * TILE_SIZE_PIXELS;
-
-					const color = mino_color(@intFromEnum(active_mino.type));
-					Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
-					Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+			if (app_state == .GAME_NOT_STARTED or app_state == .GAME_OVER) {
+				{
+					try Draw_Text(renderer, GAME_START_TEXT_X_OFFSET, GAME_START_TEXT_Y_OFFSET, "Press SPACE to start", font, @intFromEnum(Color.WHITE));
 				}
 			}
 
-			{ // Next mino
-				const next_mino = state.next_mino;
-				const x_offset = (WINDOW_WIDTH / 2) + FIELD_WIDTH_PIXELS;
-				const y_offset = (WINDOW_HEIGHT / 2);
+			if (app_state == .GAME_PLAYING) {
+				{ // Active mino
+					const active_mino = state.active_mino;
+					for (Minoes[@intCast(@intFromEnum(active_mino.type))].rotations[@intFromEnum(active_mino.rotation)]) |offsets| {
+						const x = active_mino.pos.x + offsets.x;
+						const y = active_mino.pos.y + offsets.y;
 
-				for (Minoes[@intCast(@intFromEnum(next_mino.type))].rotations[@intFromEnum(next_mino.rotation)]) |offsets| {
-					const x = next_mino.pos.x + offsets.x;
-					const y = next_mino.pos.y + offsets.y;
+						const dx = FIELD_X_OFFSET + x * TILE_SIZE_PIXELS;
+						const dy = FIELD_Y_OFFSET + y * TILE_SIZE_PIXELS;
 
-					const dx = x_offset + x * TILE_SIZE_PIXELS;
-					const dy = y_offset + y * TILE_SIZE_PIXELS;
-
-					const color = mino_color(@intFromEnum(next_mino.type));
-					Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
-					Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+						const color = mino_color(@intFromEnum(active_mino.type));
+						Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
+						Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+					}
 				}
 
+				{ // Next mino
+					const next_mino = state.next_mino;
+					for (Minoes[@intCast(@intFromEnum(next_mino.type))].rotations[@intFromEnum(next_mino.rotation)]) |offsets| {
+						const x = next_mino.pos.x + offsets.x;
+						const y = next_mino.pos.y + offsets.y;
+
+						const dx = NEXT_MINO_X_OFFSET + x * TILE_SIZE_PIXELS;
+						const dy = NEXT_MINO_Y_OFFSET + y * TILE_SIZE_PIXELS;
+
+						const color = mino_color(@intFromEnum(next_mino.type));
+						Fill_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, color);
+						Draw_Rect(renderer, dx, dy, TILE_SIZE_PIXELS, TILE_SIZE_PIXELS, @intFromEnum(Color.LIGHT_GREY));
+					}
+
+				}
+
+				{ // Text
+					const score_string = try std.fmt.allocPrintZ(allocator, "Lines Cleared: {}", .{state.lines_cleared});
+					defer allocator.free(score_string);
+
+					const c_string: [*c]const u8 = @ptrCast(score_string);
+					try Draw_Text(renderer, GAME_START_TEXT_X_OFFSET, 50, c_string, font, @intFromEnum(Color.WHITE));
+				}
 			}
 
-			{ // Text
-				const score_string = try std.fmt.allocPrintZ(allocator, "Lines Cleared: {}", .{state.lines_cleared});
-				defer allocator.free(score_string);
+			if (app_state == .GAME_OVER) {
+				{
+					const score_string = try std.fmt.allocPrintZ(allocator, "Final score: {}", .{state.lines_cleared});
+					defer allocator.free(score_string);
 
-				const c_string: [*c]const u8 = @ptrCast(score_string);
-				try Draw_Text(renderer, FIELD_X_OFFSET + FIELD_WIDTH_PIXELS + 50, 50, c_string, font, @intFromEnum(Color.WHITE));
+					const c_string: [*c]const u8 = @ptrCast(score_string);
+					try Draw_Text(renderer, GAME_START_TEXT_X_OFFSET, 2 * GAME_START_TEXT_Y_OFFSET, c_string, font, @intFromEnum(Color.WHITE));
+				}
 			}
 
 			c.SDL_RenderPresent(renderer);
@@ -247,13 +286,13 @@ fn Draw_Text(renderer: *c.SDL_Renderer, x: c_int, y: c_int, text: [*c]const u8, 
 	const color = Make_SDL_Color(rgba);
 
 	const surface = c.TTF_RenderText_Blended(font, text, color) orelse {
-		c.SDL_Log("Unable to render text to surface: %s", c.TTF_GetError());
+		c.SDL_LogError(c.SDL_LOG_CATEGORY_ERROR, "Unable to render text to surface: %s", c.TTF_GetError());
 		return error.SDLRenderFailed;
 	};
 	defer c.SDL_FreeSurface(surface);
 
 	const texture = c.SDL_CreateTextureFromSurface(renderer, surface) orelse {
-		c.SDL_Log("Unable to create texture from surface: %s", c.SDL_GetError());
+		c.SDL_LogError(c.SDL_LOG_CATEGORY_ERROR, "Unable to create texture from surface: %s", c.SDL_GetError());
 		return error.SDLRenderFailed;
 	};
 	defer c.SDL_DestroyTexture(texture);
@@ -389,10 +428,10 @@ const Minoes = [NUM_MINO_TYPES]MinoDef{
 	},
 };
 
-const GameInput = enum {
-	ROTATE,
-	MOVE_LEFT,
-	MOVE_RIGHT,
+const AppState = enum {
+	GAME_NOT_STARTED,
+	GAME_PLAYING,
+	GAME_OVER,
 };
 
 const MinoInstance = struct {
