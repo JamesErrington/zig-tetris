@@ -107,7 +107,12 @@ pub fn main() !void {
 				if (event.type == c.SDL_KEYDOWN) {
 					switch (event.key.keysym.sym) {
 						c.SDLK_UP => {
-							state.active_mino.rotation = next_rotation(state.active_mino.rotation);
+							var future_mino = state.active_mino;
+							future_mino.rotation = next_rotation(state.active_mino.rotation);
+							// Currently no handling of rotation "kicks"
+							if (!check_collision(&state, &future_mino)) {
+								state.active_mino.rotation = future_mino.rotation;
+							}
 						},
 						c.SDLK_DOWN => {
 							var future_mino = state.active_mino;
