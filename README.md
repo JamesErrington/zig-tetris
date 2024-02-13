@@ -6,3 +6,11 @@ Zig SDL setup: https://github.com/andrewrk/sdl-zig-demo
 Tetris design: https://tetris.fandom.com/wiki/SRS
 
 Zig is great!
+
+Requires SDL2 and SDL2_ttf installed on your system.
+
+```bash
+> zig build run
+```
+
+![Preview image](./game.png)
