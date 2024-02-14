@@ -1,3 +1,4 @@
 # Zig Build Artifacts
-zig-out
 zig-cache
+
+.DS_Store

@@ -1,28 +1,54 @@
 const std = @import("std");
 
+const Platform = enum {
+	sdl,
+	wasm,
+	all,
+};
+
 pub fn build(b: *std.Build) void {
-	const target = b.standardTargetOptions(.{});
-	const optimize = b.standardOptimizeOption(.{});
+	const platform = b.option(Platform, "platform", "platform to build for") orelse .all;
 
-	const exe = b.addExecutable(.{
-		.name = "main",
-		.root_source_file = .{ .path = "src/main.zig" },
-		.target = target,
-		.optimize = optimize,
-	});
+	if (platform == .sdl or platform == .all) {
+		const target = b.standardTargetOptions(.{});
+		const optimize = b.standardOptimizeOption(.{});
 
-	exe.linkSystemLibrary("SDL2");
-	exe.linkSystemLibrary("SDL2_ttf");
-    exe.linkLibC();
+		const exe = b.addExecutable(.{
+			.name = "tetris",
+			.root_source_file = .{ .path = "src/sdl.zig" },
+			.target = target,
+			.optimize = optimize,
+		});
 
-	b.installArtifact(exe);
+		exe.linkSystemLibrary("SDL2");
+		exe.linkSystemLibrary("SDL2_ttf");
+	    exe.linkLibC();
 
-	const run_cmd = b.addRunArtifact(exe);
-	run_cmd.step.dependOn(b.getInstallStep());
-	if (b.args) |args| {
-		run_cmd.addArgs(args);
+		b.installArtifact(exe);
+
+		const run_cmd = b.addRunArtifact(exe);
+		run_cmd.step.dependOn(b.getInstallStep());
+		if (b.args) |args| {
+			run_cmd.addArgs(args);
+		}
+
+		const run_step = b.step("run", "Run the app");
+		run_step.dependOn(&run_cmd.step);
 	}
 
-	const run_step = b.step("run", "Run the app");
-	run_step.dependOn(&run_cmd.step);
+	if (platform == .wasm or platform == .all) {
+		const lib = b.addSharedLibrary(.{
+			.name = "game",
+			.root_source_file = .{ .path = "src/game.zig" },
+			.target = .{
+				.cpu_arch = .wasm32,
+				.os_tag = .freestanding,
+			},
+			.optimize = .ReleaseSmall,
+		});
+
+		lib.rdynamic = true;
+
+		b.installArtifact(lib);
+	}
 }
